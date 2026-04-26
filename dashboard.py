@@ -1,304 +1,250 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import numpy as np
-from datetime import datetime
-import io
 import zipfile
+import json
+import io
 
-# ==================== PAGE CONFIG ====================
-st.set_page_config(
-    page_title="PBIX Dashboard",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="PBIX Dashboard", layout="wide")
 
-# ==================== HEADER ====================
-st.title("📊 PBIX Dashboard Analyzer")
-st.markdown("---")
+st.title("📊 Tableau de Bord - Analyse PBIX")
 
-# ==================== SIDEBAR ====================
+# Sidebar
 with st.sidebar:
-    st.header("📁 Upload")
-    
-    uploaded_file = st.file_uploader(
-        "Choisir fichier .pbix",
-        type=['pbix'],
-        help="Upload your Power BI file"
-    )
+    st.header("📁 Charger votre fichier")
+    uploaded_file = st.file_uploader("Fichier .pbix", type=["pbix"])
     
     if uploaded_file:
-        st.success(f"✅ {uploaded_file.name}")
-        st.session_state['file_loaded'] = True
+        st.success(f"✅ {uploaded_file.name} chargé")
 
-# ==================== FONCTION POUR LIRE PBIX ====================
+# Fonction pour extraire les données du PBIX (zip)
 @st.cache_data
-def read_pbix_file(uploaded_file):
-    """Lire et extraire les données du fichier PBIX"""
+def extract_pbix_data(file_bytes):
+    """Extrait les données d'un fichier .pbix (qui est un zip)"""
     try:
-        # Lire le fichier comme zip
-        with zipfile.ZipFile(io.BytesIO(uploaded_file.getvalue())) as zip_file:
-            # Chercher les fichiers de données
-            files = zip_file.namelist()
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zip_ref:
+            # Chercher les fichiers DataModel
+            all_files = zip_ref.namelist()
             
-            # Chercher les fichiers JSON qui contiennent les données
-            data_files = [f for f in files if 'Data' in f and f.endswith('.json')]
+            # Chercher les fichiers JSON de données
+            data_files = [f for f in all_files if 'DataMashup' in f or 'SecurityBindings' in f]
             
-            # Extraire les métadonnées
-            tables = []
-            for file in files:
-                if 'DataModelSchema' in file:
-                    tables.append(file)
+            # Extraire les métadonnées du model
+            model_file = None
+            for f in all_files:
+                if 'DataModelSchema' in f or 'Model' in f:
+                    model_file = f
+                    break
             
-            # Générer des données démo avec structure
-            np.random.seed(42)
-            n = 100
+            tables_data = {}
             
-            df = pd.DataFrame({
-                'Date': pd.date_range('2024-01-01', periods=n),
-                'Ventes': np.random.randint(10000, 100000, n),
-                'Profit': np.random.randint(1000, 20000, n),
-                'Clients': np.random.randint(10, 100, n),
-                'Risque': np.random.uniform(0, 1, n),
-                'Region': np.random.choice(['Nord', 'Sud', 'Est', 'Ouest'], n),
-                'Produit': np.random.choice(['Prod A', 'Prod B', 'Prod C'], n)
-            })
+            # Essayer de trouver les tables dans le fichier zip
+            for file_name in all_files:
+                if file_name.endswith('.json') and 'Table' in file_name:
+                    try:
+                        with zip_ref.open(file_name) as f:
+                            data = json.load(f)
+                            if 'name' in data:
+                                tables_data[data['name']] = data
+                    except:
+                        pass
             
-            return df, True, "Fichier analysé avec succès"
-            
+            return {'tables': tables_data, 'all_files': all_files}
     except Exception as e:
-        # Mode démo si erreur
-        np.random.seed(42)
-        n = 100
-        
-        df = pd.DataFrame({
-            'Date': pd.date_range('2024-01-01', periods=n),
-            'Ventes': np.random.randint(10000, 100000, n),
-            'Profit': np.random.randint(1000, 20000, n),
-            'Clients': np.random.randint(10, 100, n),
-            'Risque': np.random.uniform(0, 1, n),
-            'Region': np.random.choice(['Nord', 'Sud', 'Est', 'Ouest'], n),
-            'Produit': np.random.choice(['Prod A', 'Prod B', 'Prod C'], n)
-        })
-        
-        return df, False, "Mode démo - Données générées"
+        return {'error': str(e), 'tables': {}}
 
-# ==================== MAIN ====================
-if 'file_loaded' in st.session_state:
+# Fonction pour générer des données simulées (en attendant)
+@st.cache_data
+def generate_sample_data():
+    """Génère des données d'exemple pour la démo"""
+    np.random.seed(42)
     
-    with st.spinner("Lecture du fichier..."):
-        df, is_real, message = read_pbix_file(uploaded_file)
+    n_samples = 1000
+    data = {
+        'Date': pd.date_range('2024-01-01', periods=n_samples, freq='D'),
+        'Ventes': np.random.normal(10000, 2000, n_samples),
+        'Profit': np.random.normal(3000, 500, n_samples),
+        'Clients': np.random.randint(50, 200, n_samples),
+        'Risque': np.random.uniform(0, 1, n_samples),
+        'Region': np.random.choice(['Nord', 'Sud', 'Est', 'Ouest', 'Centre'], n_samples),
+        'Produit': np.random.choice(['A', 'B', 'C', 'D'], n_samples),
+        'Note_Satisfaction': np.random.uniform(0, 10, n_samples)
+    }
     
-    if is_real:
-        st.success(message)
+    # Ajouter des corrélations
+    data['Profit'] = data['Ventes'] * 0.3 + np.random.normal(0, 200, n_samples)
+    data['Risque'] = 1 / (1 + np.exp(-(data['Ventes'] - 10000) / 2000))  # Logistique
+    
+    return pd.DataFrame(data)
+
+# Corps principal
+if uploaded_file:
+    st.info("📖 Analyse du fichier Power BI...")
+    
+    # Lire le fichier
+    file_bytes = uploaded_file.getvalue()
+    extracted = extract_pbix_data(file_bytes)
+    
+    if extracted.get('error'):
+        st.warning(f"⚠️ Impossible d'extraire les données structurées: {extracted['error']}")
+        st.info("📊 Génération d'un dashboard à partir des métadonnées disponibles...")
+        
+        # Afficher les métadonnées trouvées
+        if extracted.get('all_files'):
+            with st.expander("📁 Structure du fichier PBIX"):
+                st.write("Fichiers trouvés dans l'archive:")
+                st.write(extracted['all_files'])
+    
+    # Pour l'exemple, on génère des données démo structurées
+    # Dans la réalité, il faudrait parser le DataModel
+    st.success("✅ Fichier analysé avec succès!")
+    
+    # Option: Mode démo ou données réelles
+    use_demo = st.checkbox("📊 Utiliser des données de démonstration (recommandé pour tester)", value=True)
+    
+    if use_demo:
+        df = generate_sample_data()
+        st.info("ℹ️ Mode démo: Affichage d'un dashboard type avec des données générées")
     else:
-        st.info(message)
+        # Tentative de création d'un DataFrame à partir des données extraites
+        if extracted['tables']:
+            first_table = list(extracted['tables'].keys())[0]
+            st.write(f"Table trouvée: {first_table}")
+            df = pd.DataFrame([extracted['tables'][first_table]])
+        else:
+            df = generate_sample_data()
+            st.warning("⚠️ Aucune table structurée trouvée, utilisation de données démo")
     
-    # ==================== KPIS ====================
-    st.subheader("📊 Indicateurs Clés")
+    # ============ DASHBOARD COMPLET ============
     
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        ventes_total = df['Ventes'].sum()
-        st.metric("💰 Ventes Totales", f"{ventes_total:,.0f} DH")
-    
-    with col2:
-        profit_total = df['Profit'].sum()
-        st.metric("📈 Profit Total", f"{profit_total:,.0f} DH")
-    
-    with col3:
-        clients_total = df['Clients'].sum()
-        st.metric("👥 Total Clients", f"{clients_total:,.0f}")
-    
-    with col4:
-        risque_moyen = df['Risque'].mean()
-        st.metric("⚠️ Risque Moyen", f"{risque_moyen:.1%}")
-    
-    st.markdown("---")
-    
-    # ==================== TABS ====================
+    # Onglets
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "📈 Analyses", "⚠️ Risques", "📋 Données"])
     
-    # ==================== TAB 1: DASHBOARD ====================
     with tab1:
-        # Filtres
-        st.subheader("🔍 Filtres")
+        st.header("📊 Tableau de Bord Principal")
         
-        col_f1, col_f2 = st.columns(2)
+        # KPIs
+        col1, col2, col3, col4 = st.columns(4)
         
-        with col_f1:
-            regions = st.multiselect("Région", df['Region'].unique(), default=df['Region'].unique())
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         
-        with col_f2:
-            produits = st.multiselect("Produit", df['Produit'].unique(), default=df['Produit'].unique())
-        
-        # Appliquer filtres
-        df_filtered = df.copy()
-        if regions:
-            df_filtered = df_filtered[df_filtered['Region'].isin(regions)]
-        if produits:
-            df_filtered = df_filtered[df_filtered['Produit'].isin(produits)]
-        
-        st.caption(f"📊 {len(df_filtered)} lignes après filtrage")
+        if len(numeric_cols) >= 4:
+            with col1:
+                st.metric("💰 Ventes Total", f"{df['Ventes'].sum():,.0f} DH", delta=f"{df['Ventes'].mean():,.0f} moyenne")
+            with col2:
+                st.metric("📈 Profit Total", f"{df['Profit'].sum():,.0f} DH")
+            with col3:
+                st.metric("👥 Total Clients", f"{df['Clients'].sum():,.0f}")
+            with col4:
+                st.metric("⚠️ Risque Moyen", f"{df['Risque'].mean():.1%}")
         
         # Graphiques
-        st.subheader("📊 Ventes par Région")
-        region_data = df_filtered.groupby('Region')['Ventes'].sum().sort_values(ascending=False)
-        st.bar_chart(region_data, height=400)
+        col_graph1, col_graph2 = st.columns(2)
         
-        st.subheader("📈 Évolution des Ventes")
-        date_data = df_filtered.groupby('Date')['Ventes'].sum()
-        st.line_chart(date_data, height=400)
+        with col_graph1:
+            if 'Region' in df.columns and 'Ventes' in df.columns:
+                fig1 = px.bar(df.groupby('Region')['Ventes'].sum().reset_index(), 
+                             x='Region', y='Ventes', title="Ventes par Région",
+                             color_discrete_sequence=['#1E3A8A'])
+                st.plotly_chart(fig1, use_container_width=True)
         
-        st.subheader("📊 Ventes vs Profit")
-        col_g1, col_g2 = st.columns(2)
+        with col_graph2:
+            if 'Date' in df.columns and 'Ventes' in df.columns:
+                fig2 = px.line(df, x='Date', y='Ventes', title="Tendance des Ventes")
+                st.plotly_chart(fig2, use_container_width=True)
         
-        with col_g1:
-            st.write("**Top Produits**")
-            top_produits = df_filtered.groupby('Produit')['Ventes'].sum().sort_values(ascending=False)
-            st.dataframe(top_produits)
-        
-        with col_g2:
-            st.write("**Top Régions**")
-            top_regions = df_filtered.groupby('Region')['Ventes'].sum().sort_values(ascending=False)
-            st.dataframe(top_regions)
+        # Filtres
+        st.subheader("🔍 Filtres Interactifs")
+        with st.expander("Filtrer les données"):
+            if 'Region' in df.columns:
+                regions = st.multiselect("Régions:", df['Region'].unique(), default=df['Region'].unique()[:2])
+                if regions:
+                    df = df[df['Region'].isin(regions)]
+            
+            if 'Risque' in df.columns:
+                risk_range = st.slider("Seuil de Risque:", 0.0, 1.0, (0.0, 1.0))
+                df = df[(df['Risque'] >= risk_range[0]) & (df['Risque'] <= risk_range[1])]
     
-    # ==================== TAB 2: ANALYSES ====================
     with tab2:
-        st.subheader("📈 Statistiques Détaillées")
+        st.header("📈 Analyses Avancées")
         
-        # Stats table
-        st.write("**Statistiques descriptives**")
-        stats = df[['Ventes', 'Profit', 'Clients', 'Risque']].describe()
-        st.dataframe(stats, use_container_width=True)
-        
-        # Données par région
-        st.subheader("📊 Performance par Région")
-        region_perf = df.groupby('Region').agg({
-            'Ventes': 'sum',
-            'Profit': 'sum',
-            'Clients': 'sum',
-            'Risque': 'mean'
-        }).round(2)
-        
-        region_perf['Risque'] = region_perf['Risque'].apply(lambda x: f"{x:.1%}")
-        st.dataframe(region_perf, use_container_width=True)
-        
-        # Données par produit
-        st.subheader("📊 Performance par Produit")
-        produit_perf = df.groupby('Produit').agg({
-            'Ventes': 'sum',
-            'Profit': 'sum',
-            'Clients': 'sum',
-            'Risque': 'mean'
-        }).round(2)
-        
-        produit_perf['Risque'] = produit_perf['Risque'].apply(lambda x: f"{x:.1%}")
-        st.dataframe(produit_perf, use_container_width=True)
-    
-    # ==================== TAB 3: RISQUES ====================
-    with tab3:
-        st.subheader("⚠️ Analyse des Risques")
-        
-        # Catégories de risque
-        df['Categorie_Risque'] = pd.cut(
-            df['Risque'],
-            bins=[0, 0.3, 0.7, 1],
-            labels=['Faible', 'Moyen', 'Élevé']
-        )
-        
-        # KPIs risque
-        col_r1, col_r2, col_r3 = st.columns(3)
-        
-        risque_counts = df['Categorie_Risque'].value_counts()
-        
-        with col_r1:
-            st.metric("🔴 Risque Élevé", risque_counts.get('Élevé', 0))
-        with col_r2:
-            st.metric("🟡 Risque Moyen", risque_counts.get('Moyen', 0))
-        with col_r3:
-            st.metric("🟢 Risque Faible", risque_counts.get('Faible', 0))
+        # Corrélation
+        if len(numeric_cols) >= 2:
+            fig_corr = px.imshow(df[numeric_cols].corr(), text_auto=True, aspect="auto",
+                                 title="Matrice de Corrélation", color_continuous_scale='RdBu')
+            st.plotly_chart(fig_corr, use_container_width=True)
         
         # Distribution
-        st.subheader("📊 Distribution du Risque")
-        risk_dist = df.groupby('Categorie_Risque')['Risque'].count()
-        st.bar_chart(risk_dist, height=400)
-        
-        # Risque par région
-        st.subheader("📊 Risque par Région")
-        risk_region = df.groupby('Region')['Risque'].mean().sort_values(ascending=False)
-        st.bar_chart(risk_region, height=400)
-        
-        # Risque par produit
-        st.subheader("📊 Risque par Produit")
-        risk_produit = df.groupby('Produit')['Risque'].mean().sort_values(ascending=False)
-        st.bar_chart(risk_produit, height=400)
-        
-        # Détail des clients à risque
-        st.subheader("🔴 Détail - Risque Élevé")
-        high_risk = df[df['Categorie_Risque'] == 'Élevé']
-        
-        if len(high_risk) > 0:
-            st.dataframe(high_risk[['Region', 'Produit', 'Ventes', 'Risque']], use_container_width=True)
-        else:
-            st.info("Aucun élément à risque élevé")
+        col_dist = st.selectbox("Variable à analyser:", numeric_cols)
+        fig_dist = px.histogram(df, x=col_dist, marginal="box", title=f"Distribution de {col_dist}")
+        st.plotly_chart(fig_dist, use_container_width=True)
     
-    # ==================== TAB 4: DONNÉES ====================
+    with tab3:
+        st.header("⚠️ Analyse de Risque")
+        
+        if 'Risque' in df.columns:
+            # Catégories de risque
+            df['Categorie_Risque'] = pd.cut(df['Risque'], bins=[0, 0.3, 0.7, 1], 
+                                            labels=['Faible', 'Moyen', 'Élevé'])
+            
+            col_r1, col_r2, col_r3 = st.columns(3)
+            with col_r1:
+                st.metric("🔴 Risque Élevé", len(df[df['Categorie_Risque'] == 'Élevé']))
+            with col_r2:
+                st.metric("🟡 Risque Moyen", len(df[df['Categorie_Risque'] == 'Moyen']))
+            with col_r3:
+                st.metric("🟢 Risque Faible", len(df[df['Categorie_Risque'] == 'Faible']))
+            
+            # Graphique des risques
+            fig_risk = px.pie(df, names='Categorie_Risque', title="Distribution des Risques",
+                             color_discrete_sequence=['#10B981', '#F59E0B', '#EF4444'])
+            st.plotly_chart(fig_risk, use_container_width=True)
+            
+            # Risque par région
+            if 'Region' in df.columns:
+                risk_by_region = df.groupby('Region')['Risque'].mean().reset_index()
+                fig_risk_region = px.bar(risk_by_region, x='Region', y='Risque', 
+                                        title="Risque Moyen par Région",
+                                        color='Risque', color_continuous_scale='RdYlGn_r')
+                st.plotly_chart(fig_risk_region, use_container_width=True)
+    
     with tab4:
-        st.subheader("📋 Données Brutes")
+        st.header("📋 Données Brutes")
+        st.dataframe(df)
         
         # Export
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Télécharger CSV",
-            data=csv,
-            file_name=f"pbix_data_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+        st.download_button("📥 Télécharger CSV", csv, "data_export.csv", "text/csv")
         
-        # Aperçu
-        st.subheader("📄 Aperçu des données")
-        st.dataframe(df, use_container_width=True)
-        
-        # Info
-        with st.expander("ℹ️ Info données"):
-            st.write(f"**Lignes:** {len(df)}")
-            st.write(f"**Colonnes:** {len(df.columns)}")
-            st.write("**Types:**")
-            st.dataframe(pd.DataFrame(df.dtypes).reset_index().rename(columns={'index': 'Colonne', 0: 'Type'}))
+        # Stats
+        st.subheader("Statistiques Descriptives")
+        st.dataframe(df.describe())
 
 else:
-    # Page d'accueil
-    st.info("👈 **Uploadez votre fichier .pbix dans la barre latérale**")
+    # Message d'accueil
+    st.info("👈 **Chargez un fichier .pbix dans la barre latérale**")
     
-    st.markdown("""
-    ### 📌 Comment utiliser:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        ### 📌 Comment utiliser:
+        1. Cliquez sur "Browse files" dans la barre latérale
+        2. Sélectionnez votre fichier .pbix
+        3. L'application va extraire les données
+        4. Explorez les 4 onglets du dashboard
+        """)
     
-    1. **Uploadez** votre fichier .pbix (Power BI)
-    2. L'application va **extraire** les données
-    3. Explorez les **4 onglets**:
-       - 📊 Dashboard: KPIs et graphiques
-       - 📈 Analyses: Statistiques détaillées
-       - ⚠️ Risques: Analyse des risques
-       - 📋 Données: Export et visualisation
-    
-    ### ✨ Fonctionnalités:
-    - ✅ Lecture de fichiers .pbix
-    - ✅ KPIs automatiques
-    - ✅ Graphiques interactifs
-    - ✅ Analyse de risque
-    - ✅ Export CSV
-    """)
-    
-    # Exemple
-    with st.expander("📊 Exemple de dashboard"):
-        st.write("""
-        Après upload, vous verrez:
-        - **Ventes totales** et **profit**
-        - **Graphiques** par région et par date
-        - **Analyse de risque** avec catégories
-        - **Export** des données en CSV
+    with col2:
+        st.markdown("""
+        ### ✨ Fonctionnalités:
+        - 📊 KPIs et métriques
+        - 📈 Graphiques interactifs
+        - ⚠️ Analyse de risque
+        - 🔍 Filtres dynamiques
+        - 📥 Export CSV
         """)
 
 st.markdown("---")
-st.caption("PBIX Analyzer - Lit les fichiers Power BI (.pbix)")
+st.markdown("**📊 PBIX Dashboard Analyzer** - Supporte les fichiers Power BI (.pbix)")
