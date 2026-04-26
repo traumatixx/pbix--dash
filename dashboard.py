@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime
 import io
 
@@ -57,6 +56,7 @@ st.markdown("""
 # ==================== FUNCTIONS ====================
 @st.cache_data
 def generate_demo_data():
+    """Generate demo data for testing"""
     np.random.seed(42)
     n = 500
     
@@ -73,54 +73,23 @@ def generate_demo_data():
         'Produit': np.random.choice(['Produit A', 'Produit B', 'Produit C', 'Produit D'], n)
     }
     
+    # Add correlations
     data['Benefices_MAD'] = data['CA_MAD'] * 0.3 + np.random.normal(0, 20000, n)
     data['Taux_Risque'] = 1 / (1 + np.exp(-(data['CA_MAD'] - 500000) / 100000))
     
     df = pd.DataFrame(data)
-    df['Niveau_Risque'] = pd.cut(df['Taux_Risque'], bins=[0, 0.3, 0.7, 1], labels=['🟢 Faible', '🟡 Moyen', '🔴 Élevé'])
+    
+    # Add risk levels
+    df['Niveau_Risque'] = pd.cut(
+        df['Taux_Risque'], 
+        bins=[0, 0.3, 0.7, 1], 
+        labels=['🟢 Faible', '🟡 Moyen', '🔴 Élevé']
+    )
+    
+    # Add month column for grouping
+    df['Mois'] = df['Date'].dt.strftime('%Y-%m')
     
     return df
-
-def create_bar_chart(data, x_col, y_col, title, color='#667eea'):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bars = ax.bar(data[x_col], data[y_col], color=color, edgecolor='white', linewidth=2)
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    ax.set_xlabel(x_col, fontsize=12)
-    ax.set_ylabel(y_col, fontsize=12)
-    ax.tick_params(axis='x', rotation=45)
-    ax.grid(axis='y', alpha=0.3)
-    
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height/1e6:.1f}M' if height > 1e6 else f'{height:,.0f}',
-                ha='center', va='bottom', fontsize=10)
-    
-    plt.tight_layout()
-    return fig
-
-def create_line_chart(data, x_col, y_col, title, color='#10b981'):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(data[x_col], data[y_col], color=color, linewidth=2, marker='o', markersize=4)
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    ax.set_xlabel(x_col, fontsize=12)
-    ax.set_ylabel(y_col, fontsize=12)
-    ax.grid(True, alpha=0.3)
-    ax.tick_params(axis='x', rotation=45)
-    plt.tight_layout()
-    return fig
-
-def create_pie_chart(labels, values, title, colors=['#10b981', '#f59e0b', '#ef4444']):
-    fig, ax = plt.subplots(figsize=(8, 8))
-    wedges, texts, autotexts = ax.pie(values, labels=labels, autopct='%1.1f%%',
-                                        colors=colors, startangle=90,
-                                        textprops={'fontsize': 12})
-    for autotext in autotexts:
-        autotext.set_color('white')
-        autotext.set_fontweight('bold')
-    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
-    plt.tight_layout()
-    return fig
 
 # ==================== HEADER ====================
 st.markdown("""
@@ -156,9 +125,18 @@ with st.sidebar:
     st.markdown("""
     - 📈 KPIs Interactifs
     - ⚠️ Analyse de Risque
-    - 📊 Graphiques Dynamiques
+    - 📊 Graphiques Streamlit
     - 🎯 Filtres Avancés
     - 💾 Export CSV & Excel
+    """)
+    
+    st.markdown("---")
+    st.markdown("### 📌 **Instructions**")
+    st.markdown("""
+    1. Uploadez votre fichier .pbix
+    2. Utilisez les filtres
+    3. Explorez les 4 onglets
+    4. Exportez vos résultats
     """)
 
 # ==================== MAIN CONTENT ====================
@@ -174,7 +152,7 @@ if 'file_uploaded' in st.session_state or 'demo_mode' in st.session_state:
     else:
         st.info("🎮 **Mode Démo** - Données générées pour illustration des fonctionnalités")
     
-    # ==================== KPIS ====================
+    # ==================== KPIS (Row 1) ====================
     st.markdown("### 🎯 **Indicateurs Clés de Performance**")
     st.markdown("---")
     
@@ -182,26 +160,66 @@ if 'file_uploaded' in st.session_state or 'demo_mode' in st.session_state:
     
     with col1:
         ca_total = df['CA_MAD'].sum() / 1e6
-        st.metric("💰 **CA Total**", f"{ca_total:.1f} M DH")
+        ca_evolution = ((df['CA_MAD'].tail(30).mean() - df['CA_MAD'].head(30).mean()) / df['CA_MAD'].head(30).mean()) * 100
+        st.metric(
+            label="💰 **Chiffre d'Affaires Total**",
+            value=f"{ca_total:.1f} M DH",
+            delta=f"{ca_evolution:.1f}% vs début"
+        )
     
     with col2:
         benef_total = df['Benefices_MAD'].sum() / 1e6
-        st.metric("📈 **Bénéfices Totaux**", f"{benef_total:.1f} M DH")
+        marge = (benef_total / ca_total) * 100 if ca_total > 0 else 0
+        st.metric(
+            label="📈 **Bénéfices Totaux**",
+            value=f"{benef_total:.1f} M DH",
+            delta=f"Marge: {marge:.1f}%"
+        )
     
     with col3:
         clients_total = df['Nbre_Clients'].sum()
-        st.metric("👥 **Total Clients**", f"{clients_total:,.0f}")
+        clients_moyen = df['Nbre_Clients'].mean()
+        st.metric(
+            label="👥 **Total Clients**",
+            value=f"{clients_total:,.0f}",
+            delta=f"Moyenne: {clients_moyen:.0f}/jour"
+        )
     
     with col4:
         risque_moyen = df['Taux_Risque'].mean()
-        st.metric("⚠️ **Risque Global**", f"{risque_moyen:.1%}")
+        risque_evolution = df['Taux_Risque'].tail(30).mean() - df['Taux_Risque'].head(30).mean()
+        st.metric(
+            label="⚠️ **Risque Global**",
+            value=f"{risque_moyen:.1%}",
+            delta=f"{risque_evolution:.1%} vs début",
+            delta_color="inverse" if risque_evolution > 0 else "normal"
+        )
+    
+    # ==================== KPIS (Row 2) ====================
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        satisfaction_moyenne = df['Satisfaction'].mean()
+        st.metric("⭐ **Satisfaction Client**", f"{satisfaction_moyenne:.1f}/10")
+    
+    with col6:
+        top_region = df.groupby('Region')['CA_MAD'].sum().idxmax()
+        st.metric("🏆 **Meilleure Région**", top_region)
+    
+    with col7:
+        top_produit = df.groupby('Produit')['CA_MAD'].sum().idxmax()
+        st.metric("🎯 **Produit Phare**", top_produit)
+    
+    with col8:
+        clients_haut_risque = len(df[df['Niveau_Risque'] == '🔴 Élevé'])
+        st.metric("⚠️ **Clients Haut Risque**", f"{clients_haut_risque}", delta=f"{(clients_haut_risque/len(df))*100:.0f}% du total")
     
     # ==================== TABS ====================
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Dashboard Principal", 
-        "📈 Analyses Statistiques", 
-        "⚠️ Analyse de Risque",
-        "📋 Données & Export"
+        "📊 **Dashboard Principal**", 
+        "📈 **Analyses Statistiques**", 
+        "⚠️ **Analyse de Risque**",
+        "📋 **Données & Export**"
     ])
     
     # ==================== TAB 1: DASHBOARD ====================
@@ -212,14 +230,14 @@ if 'file_uploaded' in st.session_state or 'demo_mode' in st.session_state:
         
         with col_f1:
             regions_selected = st.multiselect(
-                "**Régions**",
+                "**Sélectionnez les régions**",
                 df['Region'].unique(),
                 default=df['Region'].unique().tolist()
             )
         
         with col_f2:
             produits_selected = st.multiselect(
-                "**Produits**",
+                "**Sélectionnez les produits**",
                 df['Produit'].unique(),
                 default=df['Produit'].unique().tolist()
             )
@@ -230,6 +248,7 @@ if 'file_uploaded' in st.session_state or 'demo_mode' in st.session_state:
                 ['Tous', '🟢 Faible', '🟡 Moyen', '🔴 Élevé']
             )
         
+        # Apply filters
         df_filtered = df.copy()
         if regions_selected:
             df_filtered = df_filtered[df_filtered['Region'].isin(regions_selected)]
@@ -238,102 +257,266 @@ if 'file_uploaded' in st.session_state or 'demo_mode' in st.session_state:
         if risque_filter != 'Tous':
             df_filtered = df_filtered[df_filtered['Niveau_Risque'] == risque_filter]
         
-        st.markdown(f"**📊 Données filtrées:** {len(df_filtered)} lignes")
+        st.markdown(f"**📊 Données filtrées:** {len(df_filtered)} lignes sur {len(df)}")
         
-        col_g1, col_g2 = st.columns(2)
+        # Chart 1: Bar chart using st.bar_chart
+        st.markdown("#### 📊 **Chiffre d'Affaires par Région**")
+        region_sales = df_filtered.groupby('Region')['CA_MAD'].sum().reset_index()
+        region_sales = region_sales.set_index('Region')
+        st.bar_chart(region_sales, height=400, use_container_width=True)
         
-        with col_g1:
-            st.markdown("#### CA par Région")
-            region_sales = df_filtered.groupby('Region')['CA_MAD'].sum().reset_index()
-            fig1 = create_bar_chart(region_sales, 'Region', 'CA_MAD', '', '#667eea')
-            st.pyplot(fig1)
-            plt.close()
+        # Chart 2: Line chart using st.line_chart
+        st.markdown("#### 📈 **Évolution du Chiffre d'Affaires**")
+        daily_sales = df_filtered.groupby('Date')['CA_MAD'].sum().reset_index()
+        daily_sales = daily_sales.set_index('Date')
+        st.line_chart(daily_sales, height=400, use_container_width=True)
         
-        with col_g2:
-            st.markdown("#### Évolution du CA")
-            daily_sales = df_filtered.groupby('Date')['CA_MAD'].sum().reset_index()
-            fig2 = create_line_chart(daily_sales, 'Date', 'CA_MAD', '', '#10b981')
-            st.pyplot(fig2)
-            plt.close()
+        # Chart 3: Area chart
+        st.markdown("#### 📊 **CA par Mois**")
+        monthly_sales = df_filtered.groupby('Mois')['CA_MAD'].sum().reset_index()
+        monthly_sales = monthly_sales.set_index('Mois')
+        st.area_chart(monthly_sales, height=400, use_container_width=True)
+        
+        # Additional KPIs after filters
+        st.markdown("#### 📊 **KPIs après Filtrage**")
+        
+        kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+        
+        with kpi_col1:
+            ca_filtered = df_filtered['CA_MAD'].sum() / 1e6
+            st.metric("CA Filtré", f"{ca_filtered:.1f} M DH", delta=f"{(ca_filtered/ca_total-1)*100:.1f}% du total")
+        
+        with kpi_col2:
+            benef_filtered = df_filtered['Benefices_MAD'].sum() / 1e6
+            st.metric("Bénéfices Filtrés", f"{benef_filtered:.1f} M DH")
+        
+        with kpi_col3:
+            risque_filtered = df_filtered['Taux_Risque'].mean()
+            st.metric("Risque Moyen Filtré", f"{risque_filtered:.1%}")
     
-    # ==================== TAB 2: ANALYSES ====================
+    # ==================== TAB 2: ANALYSES STATISTIQUES ====================
     with tab2:
-        st.markdown("### 📈 **Statistiques Descriptives**")
+        st.markdown("### 📈 **Analyses Statistiques Avancées**")
+        
+        # Statistics table
+        st.markdown("#### 📋 **Statistiques Descriptives**")
         
         stats_df = df[['CA_MAD', 'Benefices_MAD', 'Nbre_Clients', 'Taux_Risque', 'Satisfaction']].describe()
-        st.dataframe(stats_df, use_container_width=True)
+        stats_df.index = ['Count', 'Mean', 'Std', 'Min', '25%', '50%', '75%', 'Max']
         
-        st.markdown("### 🔗 **Matrice de Corrélation**")
+        # Format numbers
+        stats_formatted = stats_df.copy()
+        stats_formatted['CA_MAD'] = stats_formatted['CA_MAD'].apply(lambda x: f"{x:,.0f}")
+        stats_formatted['Benefices_MAD'] = stats_formatted['Benefices_MAD'].apply(lambda x: f"{x:,.0f}")
+        stats_formatted['Nbre_Clients'] = stats_formatted['Nbre_Clients'].apply(lambda x: f"{x:,.0f}")
+        stats_formatted['Taux_Risque'] = stats_formatted['Taux_Risque'].apply(lambda x: f"{x:.2%}")
+        stats_formatted['Satisfaction'] = stats_formatted['Satisfaction'].apply(lambda x: f"{x:.2f}")
+        
+        st.dataframe(stats_formatted, use_container_width=True)
+        
+        # Correlation analysis
+        st.markdown("#### 🔗 **Analyse des Corrélations**")
+        
         corr_cols = ['CA_MAD', 'Benefices_MAD', 'Nbre_Clients', 'Taux_Risque', 'Satisfaction']
         corr_matrix = df[corr_cols].corr()
-        st.dataframe(corr_matrix.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), use_container_width=True)
-    
-    # ==================== TAB 3: RISQUE ====================
-    with tab3:
-        st.markdown("### ⚠️ **Analyse de Risque**")
         
-        col_r1, col_r2, col_r3 = st.columns(3)
+        # Display correlation as colored table
+        st.dataframe(corr_matrix.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), use_container_width=True)
+        
+        # Top performers
+        st.markdown("#### 🏆 **Top Performers**")
+        
+        col_t1, col_t2 = st.columns(2)
+        
+        with col_t1:
+            st.markdown("**Top 5 Produits par CA**")
+            top_products = df.groupby('Produit')['CA_MAD'].sum().sort_values(ascending=False).head(5)
+            top_products_df = pd.DataFrame(top_products)
+            st.dataframe(top_products_df, use_container_width=True)
+        
+        with col_t2:
+            st.markdown("**Top 5 Régions par CA**")
+            top_regions = df.groupby('Region')['CA_MAD'].sum().sort_values(ascending=False).head(5)
+            top_regions_df = pd.DataFrame(top_regions)
+            st.dataframe(top_regions_df, use_container_width=True)
+        
+        # Distribution using histogram (st.bar_chart on binned data)
+        st.markdown("#### 📊 **Distribution du Chiffre d'Affaires**")
+        
+        # Create bins for histogram
+        bins = pd.cut(df['CA_MAD'], bins=20)
+        hist_data = df.groupby(bins)['CA_MAD'].count()
+        hist_df = pd.DataFrame(hist_data)
+        st.bar_chart(hist_df, height=400, use_container_width=True)
+        
+        # Monthly trend
+        st.markdown("#### 📈 **Tendance Mensuelle**")
+        monthly_trend = df.groupby('Mois').agg({
+            'CA_MAD': 'sum',
+            'Benefices_MAD': 'sum',
+            'Nbre_Clients': 'sum'
+        }).reset_index()
+        
+        monthly_trend = monthly_trend.set_index('Mois')
+        st.line_chart(monthly_trend, height=400, use_container_width=True)
+    
+    # ==================== TAB 3: ANALYSE DE RISQUE ====================
+    with tab3:
+        st.markdown("### ⚠️ **Tableau de Bord du Risque**")
+        
+        # Risk KPIs
+        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
         
         risk_counts = df['Niveau_Risque'].value_counts()
+        risk_high_pct = (risk_counts.get('🔴 Élevé', 0) / len(df)) * 100
+        risk_medium_pct = (risk_counts.get('🟡 Moyen', 0) / len(df)) * 100
+        risk_low_pct = (risk_counts.get('🟢 Faible', 0) / len(df)) * 100
         
         with col_r1:
-            st.metric("🔴 **Risque Élevé**", risk_counts.get('🔴 Élevé', 0))
+            st.metric("🔴 **Risque Élevé**", f"{risk_counts.get('🔴 Élevé', 0)}", delta=f"{risk_high_pct:.0f}%")
+        
         with col_r2:
-            st.metric("🟡 **Risque Moyen**", risk_counts.get('🟡 Moyen', 0))
+            st.metric("🟡 **Risque Moyen**", f"{risk_counts.get('🟡 Moyen', 0)}", delta=f"{risk_medium_pct:.0f}%")
+        
         with col_r3:
-            st.metric("🟢 **Risque Faible**", risk_counts.get('🟢 Faible', 0))
+            st.metric("🟢 **Risque Faible**", f"{risk_counts.get('🟢 Faible', 0)}", delta=f"{risk_low_pct:.0f}%")
         
-        col_rg1, col_rg2 = st.columns(2)
+        with col_r4:
+            risque_moyen = df['Taux_Risque'].mean()
+            st.metric("📊 **Score Risque Moyen**", f"{risque_moyen:.1%}")
         
-        with col_rg1:
-            fig_pie = create_pie_chart(
-                risk_counts.index.tolist(),
-                risk_counts.values.tolist(),
-                'Distribution du Risque'
-            )
-            st.pyplot(fig_pie)
-            plt.close()
+        # Risk distribution bar chart
+        st.markdown("#### 📊 **Distribution des Niveaux de Risque**")
+        risk_dist_df = pd.DataFrame(risk_counts)
+        st.bar_chart(risk_dist_df, height=400, use_container_width=True)
         
-        with col_rg2:
-            risk_region = df.groupby('Region')['Taux_Risque'].mean().sort_values(ascending=False).reset_index()
-            fig_risk = create_bar_chart(risk_region, 'Region', 'Taux_Risque', 'Risque par Région', '#ef4444')
-            st.pyplot(fig_risk)
-            plt.close()
+        # Risk by region
+        st.markdown("#### 📊 **Risque Moyen par Région**")
+        risk_region = df.groupby('Region')['Taux_Risque'].mean().sort_values(ascending=False)
+        risk_region_df = pd.DataFrame(risk_region)
+        st.bar_chart(risk_region_df, height=400, use_container_width=True)
+        
+        # Risk by product
+        st.markdown("#### 📊 **Risque Moyen par Produit**")
+        risk_product = df.groupby('Produit')['Taux_Risque'].mean().sort_values(ascending=False)
+        risk_product_df = pd.DataFrame(risk_product)
+        st.bar_chart(risk_product_df, height=400, use_container_width=True)
+        
+        # Detailed risk table
+        st.markdown("#### 📋 **Détail du Risque par Produit**")
+        
+        risk_detail = df.groupby('Produit').agg({
+            'Taux_Risque': ['mean', 'count'],
+            'CA_MAD': 'sum',
+            'Nbre_Clients': 'sum'
+        }).round(4)
+        
+        risk_detail.columns = ['Risque Moyen', 'Nb Transactions', 'CA Total (M MAD)', 'Nb Clients']
+        risk_detail['Risque Moyen'] = risk_detail['Risque Moyen'].apply(lambda x: f"{x:.1%}")
+        risk_detail['CA Total (M MAD)'] = risk_detail['CA Total (M MAD)'] / 1e6
+        risk_detail['CA Total (M MAD)'] = risk_detail['CA Total (M MAD)'].apply(lambda x: f"{x:.1f}")
+        
+        st.dataframe(risk_detail, use_container_width=True)
+        
+        # Risk trends over time
+        st.markdown("#### 📈 **Évolution du Risque dans le Temps**")
+        risk_trend = df.groupby('Mois')['Taux_Risque'].mean().reset_index()
+        risk_trend = risk_trend.set_index('Mois')
+        st.line_chart(risk_trend, height=400, use_container_width=True)
+        
+        # High risk clients table
+        st.markdown("#### 🔴 **Clients à Haut Risque**")
+        high_risk_clients = df[df['Niveau_Risque'] == '🔴 Élevé'].head(50)
+        if len(high_risk_clients) > 0:
+            st.dataframe(high_risk_clients[['Region', 'Produit', 'CA_MAD', 'Taux_Risque']], use_container_width=True)
+        else:
+            st.info("Aucun client à haut risque détecté")
+        
+        # Risk recommendations
+        st.markdown("#### 💡 **Recommandations**")
+        
+        high_risk_regions = df[df['Niveau_Risque'] == '🔴 Élevé'].groupby('Region').size().sort_values(ascending=False).head(3)
+        
+        if len(high_risk_regions) > 0:
+            st.warning(f"⚠️ **Zones à risque élevé:** {', '.join(high_risk_regions.index.tolist())}")
+        
+        st.info("💡 **Actions recommandées:** Analyser en détail les régions à risque élevé, revoir les conditions de crédit, renforcer le suivi client.")
     
-    # ==================== TAB 4: DONNÉES ====================
+    # ==================== TAB 4: DONNÉES & EXPORT ====================
     with tab4:
-        st.markdown("### 📋 **Export des Données**")
+        st.markdown("### 📋 **Données Brutes & Export**")
         
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 **Télécharger CSV**",
-            data=csv_data,
-            file_name=f"pbix_data_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+        # Export options
+        col_e1, col_e2 = st.columns([1, 3])
         
-        st.markdown("### 📄 **Aperçu des données**")
+        with col_e1:
+            # CSV export
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 **Télécharger CSV**",
+                data=csv_data,
+                file_name=f"pbix_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+            # Excel export option
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Data', index=False)
+                risk_detail.to_excel(writer, sheet_name='Risk_Analysis')
+            
+            st.download_button(
+                label="📊 **Télécharger Excel**",
+                data=buffer.getvalue(),
+                file_name=f"pbix_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        with col_e2:
+            st.info("📌 **Formats disponibles:** CSV pour analyse, Excel pour rapport complet")
+        
+        # Data preview
+        st.markdown("#### 📄 **Aperçu des données (100 premières lignes)**")
         st.dataframe(df.head(100), use_container_width=True)
+        
+        # Data info
+        with st.expander("ℹ️ **Informations sur les données**"):
+            col_info1, col_info2 = st.columns(2)
+            
+            with col_info1:
+                st.write("**Dimensions:**")
+                st.write(f"- Lignes: {len(df)}")
+                st.write(f"- Colonnes: {len(df.columns)}")
+                st.write(f"- Valeurs manquantes: {df.isnull().sum().sum()}")
+            
+            with col_info2:
+                st.write("**Types de données:**")
+                dtype_df = pd.DataFrame({
+                    'Colonne': df.dtypes.index,
+                    'Type': df.dtypes.values
+                })
+                st.dataframe(dtype_df, use_container_width=True)
+        
+        # Search functionality
+        st.markdown("#### 🔍 **Recherche dans les données**")
+        search_col = st.selectbox("Choisir une colonne", df.columns)
+        search_term = st.text_input("Terme de recherche")
+        
+        if search_term:
+            if df[search_col].dtype == 'object':
+                filtered_search = df[df[search_col].str.contains(search_term, case=False, na=False)]
+            else:
+                filtered_search = df[df[search_col].astype(str).str.contains(search_term, case=False, na=False)]
+            st.write(f"**Résultats:** {len(filtered_search)} lignes trouvées")
+            st.dataframe(filtered_search.head(50), use_container_width=True)
 
-else:
-    # ==================== PAGE D'ACCUEIL ====================
-    st.markdown("""
-    <div style="text-align: center; padding: 3rem;">
-        <h1 style="font-size: 4rem;">📊</h1>
-        <h2>Bienvenue sur PBIX Analyzer Pro</h2>
-        <p style="font-size: 1.2rem; margin-top: 1rem;">
-            Uploadez votre fichier .pbix ou testez le mode démo
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_w1, col_w2, col_w3, col_w4 = st.columns(4)
-    
-    with col_w1:
-        st.markdown("**📈 KPIs**\n\nIndicateurs clés")
-    with col_w2:
-        st.markdown("**⚠️ Risque**\n\nAnalyse avancée")
-    with col_w3:
-        st.markdown("**📊 Graphiques**\n\nVisualisations")
-    with col_w4:
-        st.markdown("**💾 Export**\n\nCSV & Excel")
+# ==================== FOOTER ====================
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; padding: 1rem;">
+    <p>🚀 <strong>PBIX Analyzer Pro</strong> | Version 100% Streamlit Natif</p>
+    <p>Développé avec Streamlit, Pandas & NumPy</p>
+</div>
+""", unsafe_allow_html=True)
